@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tomorrowland Timetable Generator",
-  "version": "1.8",
+  "version": "1.9",
   "description": "Bookmark, filter and export your Tomorrowland timetable as a high-resolution PNG/PDF (incl. iPhone lock-screen).",
   "permissions": [],
   "content_scripts": [

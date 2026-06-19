@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tomorrowland Timetable Generator
 // @namespace    http://tampermonkey.net/
-// @version      1.8
+// @version      1.9
 // @description  Bookmark, filter and export your Tomorrowland timetable as a high-resolution PNG/PDF (incl. iPhone lock-screen)
 // @author       Antigravity
 // @match        https://belgium.tomorrowland.com/*
@@ -621,6 +621,26 @@
         }
     }
 
+    // Select every set in the currently-shown grid (the current day).
+    function selectAllActs() {
+        const root = getLineupRoot();
+        const programs = root.querySelectorAll('[class*="e1ojkxpe1"], [class*="_program_"], .planby-program');
+        let added = 0;
+        programs.forEach(program => {
+            const id = getActId(program);
+            if (!id) return;
+            if (!selectedIds.has(id)) { selectedIds.add(id); added++; }
+            program.classList.add('tml-selected');
+            const btn = program.querySelector('.tml-bookmark-btn');
+            if (btn) btn.classList.add('tml-active');
+        });
+        saveState();
+        updatePanelUI();
+        applyFilterClasses();
+        if (programs.length === 0) showToast('No sets found on this day yet');
+        else showToast(added ? ('Selected all ' + programs.length + ' sets') : 'All sets already selected');
+    }
+
     // Reset all selections
     function resetSelections() {
         if (selectedIds.size === 0) return;
@@ -860,6 +880,10 @@
             .tmlx-vblock { position: absolute; display: flex; flex-direction: column; background: rgba(212,175,55,0.16); border: 1px solid #d4af37; border-radius: 8px; padding: 7px 9px; overflow: hidden; z-index: 4; }
             .tmlx-vbtime { font-size: 11px; font-weight: 600; color: #d4af37; }
             .tmlx-vbname { font-size: 14px; font-weight: 700; line-height: 1.18; margin-top: 3px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; }
+            /* Rotated (vertical) box text for narrow columns */
+            .tmlx-vblock-rot { align-items: center; justify-content: center; padding: 0; }
+            .tmlx-vrot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; transform: rotate(90deg); }
+            .tmlx-vrot .tmlx-vbname { margin: 0; }
 
             /* Bigger, bolder sizing for fixed-size (phone / lock-screen) exports */
             .tmlx-big { background: transparent; }
@@ -1049,9 +1073,10 @@
 
         let colW, pxPerMin;
         if (opts) {
-            // Fill the chosen screen: columns span the width, time axis spans the height.
+            // Fill the chosen screen: columns span the FULL width (so the grid never overflows and
+            // gets shrunk to fit, which would waste vertical space), and the time axis spans the height.
             const contentW = opts.w - 2 * rootPad;
-            colW = Math.max(120, (contentW - gutterW) / order.length);
+            colW = (contentW - gutterW) / order.length;
             const overhead = opts.compact ? 150 : 230;   // header + paddings above/below the grid
             const availBodyH = opts.h - overhead - headH;
             pxPerMin = Math.max(1.5, availBodyH / totalMinutes);
@@ -1073,6 +1098,8 @@
         const headBase = opts ? 32 : 13;
         const nameBase = opts ? 40 : 14;
         const blockPadX = opts ? 32 : 18;
+        // With many narrow columns, rotate the box text to vertical so it reads down the (tall) box.
+        const vertical = !!opts && order.length > 6;
 
         // Column headers (stage names) + faint column separators.
         let heads = '';
@@ -1092,20 +1119,36 @@
             const width = colW - 10;
             const top = headH + (x.m.s - min) * pxPerMin + 3;
             const height = Math.max(34, (x.m.e - x.m.s) * pxPerMin - 6);
-            const padY = opts ? 14 : 7;
-            const innerW = width - blockPadX - 4;        // 4px safety so nothing touches the edge
-            // Time line: shrink so the whole "HH:mm – HH:mm" fits the column width (no right clip).
             const timeStr = startLabelOf(x.a) + ' – ' + endLabelOf(x.a);
-            const tSize = fitFontPx(timeStr, innerW, opts ? 26 : 11, { whole: true, weight: 600, min: 7 });
-            const nameMargin = opts ? 8 : 3;
-            const timeH = tSize * 1.25 + nameMargin;
-            // Name fits the remaining height (no bottom clip) and the width (no right clip).
-            const nameBoxH = height - 2 * padY - timeH - 2;
-            const nSize = fitFontBox(x.a.name, innerW, nameBoxH, nameBase, 1.16, { min: 7 });
-            blocks += `<div class="tmlx-vblock" style="left:${left}px;width:${width}px;top:${top}px;height:${height}px;background:${hexToRgba(c, 0.16)};border-color:${c}">
-                <div class="tmlx-vbtime" style="font-size:${tSize}px;color:${c};${glow(c)}">${esc(timeStr)}</div>
-                <div class="tmlx-vbname" style="font-size:${nSize}px;${glow(c)}">${esc(x.a.name)}</div>
-            </div>`;
+            const boxStyle = `left:${left}px;width:${width}px;top:${top}px;height:${height}px;background:${hexToRgba(c, 0.16)};border-color:${c}`;
+
+            if (vertical) {
+                // Rotated text: the line runs along the box HEIGHT, lines stack across the box WIDTH.
+                const pad = 5;
+                const lineLen = Math.max(10, height - 2 * pad);   // text line length (no end clip)
+                const crossW = Math.max(10, width - 2 * pad);     // room to stack lines
+                const tSize = fitFontPx(timeStr, lineLen - 2, opts ? 15 : 8, { whole: true, weight: 600, min: 6 });
+                const timeThk = tSize * 1.3 + 6;
+                const nameCross = Math.max(8, crossW - timeThk);
+                const nSize = fitFontBox(x.a.name, lineLen - 2, nameCross, opts ? 60 : 18, 1.12, { min: 7 });
+                blocks += `<div class="tmlx-vblock tmlx-vblock-rot" style="${boxStyle}">
+                    <div class="tmlx-vrot" style="width:${lineLen}px;height:${crossW}px">
+                        <div class="tmlx-vbtime" style="font-size:${tSize}px;color:${c};${glow(c)}">${esc(timeStr)}</div>
+                        <div class="tmlx-vbname" style="font-size:${nSize}px;${glow(c)}">${esc(x.a.name)}</div>
+                    </div>
+                </div>`;
+            } else {
+                const padY = opts ? 14 : 7;
+                const innerW = width - blockPadX - 4;        // 4px safety so nothing touches the edge
+                const tSize = fitFontPx(timeStr, innerW, opts ? 26 : 11, { whole: true, weight: 600, min: 7 });
+                const timeH = tSize * 1.25 + (opts ? 8 : 3);
+                const nameBoxH = height - 2 * padY - timeH - 2;
+                const nSize = fitFontBox(x.a.name, innerW, nameBoxH, nameBase, 1.16, { min: 7 });
+                blocks += `<div class="tmlx-vblock" style="${boxStyle}">
+                    <div class="tmlx-vbtime" style="font-size:${tSize}px;color:${c};${glow(c)}">${esc(timeStr)}</div>
+                    <div class="tmlx-vbname" style="font-size:${nSize}px;${glow(c)}">${esc(x.a.name)}</div>
+                </div>`;
+            }
         });
 
         const totalW = gutterW + order.length * colW;
@@ -1550,7 +1593,9 @@
                     <span class="tml-stat-label">Selected Acts:</span>
                     <span class="tml-stat-val" id="tml-selected-count">0</span>
                 </div>
-                
+
+                <button class="tml-btn" id="tml-btn-select-all">Select All Sets</button>
+
                 <div class="tml-control-group">
                     <label class="tml-switch-container">
                         <input type="checkbox" id="tml-toggle-hide">
@@ -1614,6 +1659,7 @@
         radioFade.addEventListener('change', updateMode);
         radioHide.addEventListener('change', updateMode);
 
+        document.getElementById('tml-btn-select-all').addEventListener('click', selectAllActs);
         document.getElementById('tml-btn-reset').addEventListener('click', resetSelections);
         document.getElementById('tml-btn-save-schedule').addEventListener('click', openExportModal);
 
