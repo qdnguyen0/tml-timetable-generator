@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Tomorrowland Timetable Generator",
+  "version": "1.8",
+  "description": "Bookmark, filter and export your Tomorrowland timetable as a high-resolution PNG/PDF (incl. iPhone lock-screen).",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["https://belgium.tomorrowland.com/*"],
+      "js": ["fiber-bridge.js"],
+      "run_at": "document_end",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://belgium.tomorrowland.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "icons": {
+    "128": "icon.png"
+  }
+}
